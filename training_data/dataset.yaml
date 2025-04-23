@@ -1,0 +1,7 @@
+path: C:\Files\Studies\BBD python\training_data
+train: images
+val: images
+names:
+  0: car
+  1: traffic light
+  2: bus

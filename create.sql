@@ -1,0 +1,43 @@
+CREATE TABLE IF NOT EXISTS Status (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    Title TEXT UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS Extension (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    Title TEXT UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS Image (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    Title TEXT,
+    Extension INTEGER,
+    DateTime TEXT,
+    Path TEXT,
+    Status INTEGER,
+    FOREIGN KEY (Extension) REFERENCES Extension(ID),
+    FOREIGN KEY (Status) REFERENCES Status(ID)
+);
+
+CREATE TABLE IF NOT EXISTS Object (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    Name TEXT,
+    Status INTEGER,
+    Detection REAL,
+    x1 INTEGER,
+    y1 INTEGER,
+    x2 INTEGER,
+    y2 INTEGER,
+    FOREIGN KEY (Status) REFERENCES Status(ID)
+);
+
+CREATE TABLE IF NOT EXISTS ImageObjectLink (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    Image INTEGER,
+    Object INTEGER,
+    FOREIGN KEY (Image) REFERENCES Image(ID),
+    FOREIGN KEY (Object) REFERENCES Object(ID)
+);
+
+-- Optional: pre-fill Status values
+INSERT OR IGNORE INTO Status (Title) VALUES ('Good'), ('Middle'), ('Faulty');
