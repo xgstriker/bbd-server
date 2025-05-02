@@ -5,7 +5,7 @@ import cv2
 import sqlite3
 import datetime
 from flask import Blueprint, jsonify
-from config import DATABASE, model
+from config import DATABASE, object_model
 
 model_bp = Blueprint("model", __name__)
 training_status = {"running": False, "message": "Idle", "result_path": None}
@@ -86,7 +86,7 @@ def update_model():
                     f.write(f"  {idx}: {name}\n")
 
             try:
-                model.train(
+                object_model.train(
                     data=os.path.join(training_dir, "dataset.yaml"),
                     epochs=10,
                     imgsz=1024

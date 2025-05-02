@@ -8,13 +8,20 @@ CREATE TABLE IF NOT EXISTS Extension (
     Title TEXT UNIQUE
 );
 
+CREATE TABLE IF NOT EXISTS Type (
+    ID INTEGER PRIMARY KEY AUTOINCREMENT,
+    Title TEXT UNIQUE
+);
+
 CREATE TABLE IF NOT EXISTS Image (
     ID INTEGER PRIMARY KEY AUTOINCREMENT,
     Title TEXT,
     Extension INTEGER,
+    Type INTEGER,
     DateTime TEXT,
     Path TEXT,
     Status INTEGER,
+    Text TEXT,
     FOREIGN KEY (Extension) REFERENCES Extension(ID),
     FOREIGN KEY (Status) REFERENCES Status(ID)
 );
@@ -41,3 +48,4 @@ CREATE TABLE IF NOT EXISTS ImageObjectLink (
 
 -- Optional: pre-fill Status values
 INSERT OR IGNORE INTO Status (Title) VALUES ('Good'), ('Middle'), ('Faulty');
+INSERT OR IGNORE INTO Type (Title) VALUES ('Object'), ('Text'), ('Money');

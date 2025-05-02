@@ -1,7 +1,8 @@
-path: C:\Files\Studies\BBD python\training_data
+path: C:\Files\Studies\BBD\bbd-server\training_data
 train: images
 val: images
 names:
   0: car
   1: traffic light
   2: bus
+  3: person
