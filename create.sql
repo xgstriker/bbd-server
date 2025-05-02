@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS Image (
     Status INTEGER,
     Text TEXT,
     FOREIGN KEY (Extension) REFERENCES Extension(ID),
+    FOREIGN KEY (type) REFERENCES Type(ID),
     FOREIGN KEY (Status) REFERENCES Status(ID)
 );
 

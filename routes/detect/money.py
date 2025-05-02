@@ -1,13 +1,20 @@
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 from config import money_model
-from functions import save_detection_to_db
+from functions import (
+    save_to_db,
+    classify_confidence,
+    assign_status_to_detections,
+    filter_detections
+)
 import os
 import datetime
 
 money_bp = Blueprint("money_detect", __name__)
+
 UPLOAD_FOLDER = "uploads/money"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 
 @money_bp.route("/detect-money", methods=["POST"])
 def detect_money():
@@ -25,23 +32,34 @@ def detect_money():
         detections = []
 
         for box in results.boxes:
-            cls = int(box.cls)
-            label = money_model.names.get(cls, f"unknown_{cls}")  # e.g., '10_EUR'
+            conf = float(box.conf)
+            label = money_model.names.get(int(box.cls), f"unknown_{int(box.cls)}")
+            status = classify_confidence(conf)
 
             detections.append({
                 "class": label,
-                "confidence": float(box.conf),
-                "bbox": list(map(int, box.xyxy[0].tolist()))
+                "confidence": conf,
+                "bbox": list(map(int, box.xyxy[0].tolist())),
+                "status": status
             })
 
-        # save_detection_to_db(
-        #     image_path=filepath,
-        #     detections=detections,
-        #     type_title="Money"
-        # )
+        # Assign overall status
+        image_status = assign_status_to_detections(detections)
+
+        # Filter out faulty detections if needed
+        filtered_detections = filter_detections(detections)
+
+        # Save to database
+        save_to_db(
+            image_path=filepath,
+            type_title="Money",
+            status_title=image_status,
+            detections=filtered_detections
+        )
 
         return jsonify({
-            "detections": detections
+            "status": image_status,
+            "detections": [d["class"] for d in filtered_detections]
         })
 
     except Exception as e:

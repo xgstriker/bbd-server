@@ -1,16 +1,11 @@
 from flask import Blueprint, request, jsonify
 from werkzeug.utils import secure_filename
 import datetime
-import sqlite3
-import os
-from config import DATABASE, UPLOAD_FOLDER, object_model, allowed_statuses
-from functions import classify_confidence, assign_status_to_detections
+from pathlib import Path
+from config import UPLOAD_FOLDER, object_model
+from functions import classify_confidence, assign_status_to_detections, save_to_db, filter_detections
 
 detect_bp = Blueprint("detect", __name__)
-
-
-def filter_detections(detections):
-    return [det for det in detections if det.get("status") in allowed_statuses]
 
 
 @detect_bp.route("/detect", methods=["POST"])
@@ -19,12 +14,20 @@ def detect():
         if "image" not in request.files:
             return jsonify({"error": "No image uploaded"}), 400
 
+
+        # Ensure folder exists
+        Path(UPLOAD_FOLDER).mkdir(parents=True, exist_ok=True)
+
         file = request.files["image"]
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"{timestamp}_{secure_filename(file.filename)}"
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+        # Build path using pathlib
+        filepath = Path(UPLOAD_FOLDER) / filename
         file.save(filepath)
+
+        # Ensure forward slashes for DB, YAML, JSON, etc.
+        filepath = filepath.as_posix()
 
         results = object_model(filepath)[0]
         detections = []
@@ -42,15 +45,24 @@ def detect():
                 "status": status
             })
 
+        # Assign overall image status
         image_status = assign_status_to_detections(detections)
+
+        # Filter based on allowed_statuses
         filtered_detections = filter_detections(detections)
-        # save_to_db(filepath, filtered_detections, image_status)
 
-        # return jsonify({
-        #     "detections": [d["class"] for d in filtered_detections]
-        # })
+        # Save to database
+        save_to_db(
+            image_path=filepath,
+            type_title="Object",
+            status_title=image_status,
+            detections=filtered_detections
+        )
 
-        return jsonify(detections)
+        return jsonify({
+            "status": image_status,
+            "detections": [d["class"] for d in filtered_detections]
+        })
 
     except Exception as e:
         import traceback

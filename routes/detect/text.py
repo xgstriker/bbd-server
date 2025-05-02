@@ -4,32 +4,18 @@ import easyocr
 import os
 import datetime
 import cv2
-from config import DATABASE
-from functions import save_detection_to_db
+from functions import save_to_db
 
 text_bp = Blueprint("text_detect", __name__)
 UPLOAD_FOLDER = "uploads/text"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# Supported European and nearby OCR languages
 languages = [
-    'en',  # English
-    'de',  # German
-    'fr',  # French
-    'es',  # Spanish
-    'it',  # Italian
-    'pl',  # Polish
-    'lt',  # Lithuanian
-    'lv',  # Latvian
-    'et',  # Estonian
-    'ro',  # Romanian
-    'tr',  # Turkish
-    'cs',  # Czech
-    'sk',  # Slovak
-    'sl',  # Slovenian
-    'hu'  # Hungarian
+    'en', 'de', 'fr', 'es', 'it', 'pl', 'lt', 'lv', 'et',
+    'ro', 'tr', 'cs', 'sk', 'sl', 'hu'
 ]
 
-# EasyOCR reader setup with multiple languages
 ocr_reader = easyocr.Reader(languages, gpu=False)
 
 @text_bp.route("/detect-text", methods=["POST"])
@@ -38,41 +24,40 @@ def detect_text():
         if "image" not in request.files:
             return jsonify({"error": "No image uploaded"}), 400
 
+        # Save uploaded image
         file = request.files["image"]
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         filename = f"{timestamp}_{secure_filename(file.filename)}"
         filepath = os.path.join(UPLOAD_FOLDER, filename)
         file.save(filepath)
 
+        # Read image and apply OCR
         img = cv2.imread(filepath)
-        detections = []
+        ocr_results = ocr_reader.readtext(img)
+
+        regions = []
         full_texts = []
 
-        # OCR with bounding boxes
-        ocr_results = ocr_reader.readtext(img)
         for bbox, text, _ in ocr_results:
-            x1, y1 = map(int, bbox[0])
-            x2, y2 = map(int, bbox[2])
             cleaned = text.strip()
             if cleaned:
-                detections.append({
-                    "class": "text",
-                    "confidence": 1.0,
-                    "bbox": [x1, y1, x2, y2]
-                })
                 full_texts.append(cleaned)
+                regions.append({
+                    "text": cleaned,
+                    "bbox": [int(bbox[0][0]), int(bbox[0][1]), int(bbox[2][0]), int(bbox[2][1])]
+                })
 
-        # Save into DB
-        # save_detection_to_db(
-        #     image_path=filepath,
-        #     detections=detections,
-        #     type_title="Text",
-        #     full_text="\n".join(full_texts)
-        # )
+        joined_text = "\n".join(full_texts)
+
+        # Save to database (type='Text', no detections, only OCR text)
+        save_to_db(
+            image_path=filepath,
+            type_title="Text",
+            text=joined_text
+        )
 
         return jsonify({
-            "text": "\n".join(full_texts),
-            "regions": full_texts
+            "text": joined_text
         })
 
     except Exception as e:

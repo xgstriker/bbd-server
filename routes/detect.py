@@ -78,7 +78,7 @@ def detect():
         os.makedirs(UPLOAD_FOLDER, exist_ok=True)
         file.save(filepath)
 
-        results = model(filepath)[0]
+        results = object_model(filepath)[0]
         detections = []
 
         for box in results.boxes:
@@ -86,7 +86,7 @@ def detect():
             status = classify_confidence(conf)
             cls_index = int(box.cls)
 
-            class_name = model.names.get(cls_index, f"unknown_{cls_index}")
+            class_name = object_model.names.get(cls_index, f"unknown_{cls_index}")
             detections.append({
                 "class": class_name,
                 "confidence": conf,
