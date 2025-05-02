@@ -1,118 +1,203 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, url_for, send_file
 import sqlite3
-import base64
+import os
 from config import DATABASE
 from functions import classify_confidence, assign_status_to_detections
 
 data_bp = Blueprint("data", __name__)
 
 
+def _get_conn():
+    return sqlite3.connect(DATABASE, check_same_thread=False)
+
+
 @data_bp.route("/data", methods=["GET"])
 def get_data():
-    conn = sqlite3.connect(DATABASE, check_same_thread=False)
+    conn = _get_conn()
     cursor = conn.cursor()
 
     cursor.execute("""
-        SELECT i.ID, i.Title, i.DateTime, i.Path, s.Title
+        SELECT
+            i.ID,
+            i.Title,
+            i.DateTime,
+            s.Title   AS Status,
+            e.Title   AS Extension,
+            t.Title   AS Type,
+            i.Text    AS Text
         FROM Image i
-        LEFT JOIN Status s ON i.Status = s.ID
+        LEFT JOIN Status    s ON i.Status    = s.ID
+        LEFT JOIN Extension e ON i.Extension = e.ID
+        LEFT JOIN Type      t ON i.Type      = t.ID
+        ORDER BY i.DateTime DESC
     """)
-    images = cursor.fetchall()
+    rows = cursor.fetchall()
 
-    data = []
-    for img in images:
-        img_id, title, dt, path, status = img
+    out = []
+    for img_id, title, dt, status, ext, typ, text in rows:
+        # build a download URL for this image
+        image_url = url_for("data.download_image", image_id=img_id, _external=True)
 
-        # 🖼️ Try to read image as base64
-        try:
-            with open(path, "rb") as img_file:
-                image_base64 = base64.b64encode(img_file.read()).decode("utf-8")
-        except Exception as e:
-            print(f"⚠️ Could not read image at {path}: {e}")
-            image_base64 = None
-
-        # 📦 Get linked objects
+        # pull its objects
         cursor.execute("""
-            SELECT o.ID, o.Name, o.Detection, o.x1, o.y1, o.x2, o.y2, s.Title
+            SELECT
+                o.ID,
+                o.Name,
+                o.Detection,
+                o.x1, o.y1, o.x2, o.y2,
+                s.Title AS ObjStatus
             FROM Object o
             JOIN ImageObjectLink l ON l.Object = o.ID
             LEFT JOIN Status s ON o.Status = s.ID
             WHERE l.Image = ?
         """, (img_id,))
-        objects = [
+        objs = [
             {
-                "id": row[0],
-                "class": row[1],
-                "confidence": row[2],
-                "bbox": [row[3], row[4], row[5], row[6]],
-                "status": row[7]
+                "id": oid,
+                "class": name,
+                "confidence": conf,
+                "bbox": [x1, y1, x2, y2],
+                "status": obj_st
             }
-            for row in cursor.fetchall()
+            for (oid, name, conf, x1, y1, x2, y2, obj_st)
+            in cursor.fetchall()
         ]
 
-        data.append({
+        out.append({
             "image_id": img_id,
             "title": title,
             "datetime": dt,
             "status": status,
-            "image": image_base64,
-            "objects": objects
+            "extension": ext,
+            "type": typ,
+            "text": text,
+            "image_url": image_url,
+            "objects": objs
         })
 
     conn.close()
-    return jsonify(data)
+    return jsonify(out)
+
+
+@data_bp.route("/data/image/<int:image_id>", methods=["GET"])
+def download_image(image_id):
+    """
+    Lookup the image path by ID and send it back as a file.
+    """
+    conn = _get_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT Path FROM Image WHERE ID = ?", (image_id,))
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({"error": "Image not found"}), 404
+
+    path = row[0]
+    if not os.path.isfile(path):
+        return jsonify({"error": "File missing on disk"}), 404
+
+    # send_file will guess the mimetype; as_attachment=False streams inline
+    return send_file(path, as_attachment=False)
 
 
 @data_bp.route("/data", methods=["POST"])
 def update_data():
     updates = request.get_json()
     if not isinstance(updates, list):
-        return jsonify({"error": "Expected a list of image data"}), 400
+        return jsonify({"error": "Expected a list of image updates"}), 400
 
-    conn = sqlite3.connect(DATABASE, check_same_thread=False)
+    conn = _get_conn()
     cursor = conn.cursor()
 
-    for image in updates:
-        image_id = image.get("image_id")
-        new_objects = image.get("objects", [])
+    for img in updates:
+        image_id = img.get("image_id")
+        new_objects = img.get("objects", [])
+        new_text = img.get("text", None)
+        new_type = img.get("type", None)
+        new_ext = img.get("extension", None)
 
-        # 1. Delete old objects + links for this image
-        cursor.execute("SELECT Object FROM ImageObjectLink WHERE Image = ?", (image_id,))
-        object_ids = [row[0] for row in cursor.fetchall()]
+        if image_id is None:
+            continue
 
-        if object_ids:
-            cursor.execute(f"DELETE FROM Object WHERE ID IN ({','.join('?' * len(object_ids))})", object_ids)
+        # 1) delete old objects & links
+        cursor.execute(
+            "SELECT Object FROM ImageObjectLink WHERE Image = ?",
+            (image_id,)
+        )
+        old_ids = [r[0] for r in cursor.fetchall()]
+        if old_ids:
+            ph = ",".join("?" * len(old_ids))
+            cursor.execute(f"DELETE FROM Object WHERE ID IN ({ph})", old_ids)
         cursor.execute("DELETE FROM ImageObjectLink WHERE Image = ?", (image_id,))
 
-        # 2. Reinsert new objects + links
-        for obj in new_objects:
-            name = obj["class"]
-            conf = obj["confidence"]
-            x1, y1, x2, y2 = obj["bbox"]
-            status_title = classify_confidence(conf)
+        # 2) insert new objects & update links
+        for det in new_objects:
+            nm = det["class"]
+            conf = float(det["confidence"])
+            x1, y1, x2, y2 = map(int, det["bbox"])
+            stitle = classify_confidence(conf)
 
-            # Get status ID
-            cursor.execute("SELECT ID FROM Status WHERE Title = ?", (status_title,))
-            result = cursor.fetchone()
-            status_id = result[0] if result else None
+            cursor.execute(
+                "SELECT ID FROM Status WHERE Title = ?",
+                (stitle,)
+            )
+            srow = cursor.fetchone()
+            sid = srow[0] if srow else None
 
             cursor.execute("""
                 INSERT INTO Object (Name, Detection, x1, y1, x2, y2, Status)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (name, conf, x1, y1, x2, y2, status_id))
+            """, (nm, conf, x1, y1, x2, y2, sid))
             obj_id = cursor.lastrowid
 
-            cursor.execute("INSERT INTO ImageObjectLink (Image, Object) VALUES (?, ?)", (image_id, obj_id))
+            cursor.execute(
+                "INSERT INTO ImageObjectLink (Image, Object) VALUES (?, ?)",
+                (image_id, obj_id)
+            )
 
-        # 3. Reassign image status
-        image_status = assign_status_to_detections(new_objects)
-        cursor.execute("SELECT ID FROM Status WHERE Title = ?", (image_status,))
+        # 3) recompute & update image-level status
+        img_st = assign_status_to_detections(new_objects)
+        cursor.execute("SELECT ID FROM Status WHERE Title = ?", (img_st,))
         row = cursor.fetchone()
-        status_id = row[0] if row else None
+        img_sid = row[0] if row else None
 
-        cursor.execute("UPDATE Image SET Status = ? WHERE ID = ?", (status_id, image_id))
+        # 4) update Image row (Status, Text, Type, Extension) if provided
+        fields, params = [], []
+        if img_sid is not None:
+            fields.append("Status = ?");
+            params.append(img_sid)
+        if new_text is not None:
+            fields.append("Text = ?");
+            params.append(new_text)
+        if new_type is not None:
+            cursor.execute("SELECT ID FROM Type WHERE Title = ?", (new_type,))
+            r = cursor.fetchone()
+            tid = r[0] if r else None
+            fields.append("Type = ?");
+            params.append(tid)
+        if new_ext is not None:
+            cursor.execute("SELECT ID FROM Extension WHERE Title = ?", (new_ext,))
+            r = cursor.fetchone()
+            if r:
+                eid = r[0]
+            else:
+                cursor.execute(
+                    "INSERT INTO Extension (Title) VALUES (?)",
+                    (new_ext,)
+                )
+                eid = cursor.lastrowid
+            fields.append("Extension = ?");
+            params.append(eid)
+
+        if fields:
+            params.append(image_id)
+            sql = f"UPDATE Image SET {', '.join(fields)} WHERE ID = ?"
+            cursor.execute(sql, params)
 
     conn.commit()
     conn.close()
-
     return jsonify({"success": True})
+
+
+
