@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS Image (
     Title TEXT,
     Extension INTEGER,
     Type INTEGER,
+    ReadyForTraining boolean,
     DateTime TEXT,
     Path TEXT,
     Status INTEGER,

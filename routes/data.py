@@ -1,14 +1,11 @@
 from flask import Blueprint, request, jsonify, url_for, send_file
-import sqlite3
 import os
-from config import DATABASE
-from functions import classify_confidence, assign_status_to_detections
+from functions import (
+    _get_conn,
+    classify_confidence, assign_status_to_detections
+)
 
 data_bp = Blueprint("data", __name__)
-
-
-def _get_conn():
-    return sqlite3.connect(DATABASE, check_same_thread=False)
 
 
 @data_bp.route("/data", methods=["GET"])
@@ -24,7 +21,9 @@ def get_data():
             s.Title   AS Status,
             e.Title   AS Extension,
             t.Title   AS Type,
-            i.Text    AS Text
+            i.Text    AS Text,
+            i.ReadyForTraining,
+            i.Path
         FROM Image i
         LEFT JOIN Status    s ON i.Status    = s.ID
         LEFT JOIN Extension e ON i.Extension = e.ID
@@ -33,12 +32,11 @@ def get_data():
     """)
     rows = cursor.fetchall()
 
-    out = []
-    for img_id, title, dt, status, ext, typ, text in rows:
-        # build a download URL for this image
+    data = []
+    for img_id, title, dt, status, ext, typ, text, ready, path in rows:
         image_url = url_for("data.download_image", image_id=img_id, _external=True)
 
-        # pull its objects
+        # Get associated objects
         cursor.execute("""
             SELECT
                 o.ID,
@@ -59,11 +57,10 @@ def get_data():
                 "bbox": [x1, y1, x2, y2],
                 "status": obj_st
             }
-            for (oid, name, conf, x1, y1, x2, y2, obj_st)
-            in cursor.fetchall()
+            for (oid, name, conf, x1, y1, x2, y2, obj_st) in cursor.fetchall()
         ]
 
-        out.append({
+        data.append({
             "image_id": img_id,
             "title": title,
             "datetime": dt,
@@ -71,12 +68,14 @@ def get_data():
             "extension": ext,
             "type": typ,
             "text": text,
+            "ready_for_training": bool(ready),
+            "image_path": path,
             "image_url": image_url,
             "objects": objs
         })
 
     conn.close()
-    return jsonify(out)
+    return jsonify(data)
 
 
 @data_bp.route("/data/image/<int:image_id>", methods=["GET"])
@@ -163,7 +162,7 @@ def update_data():
         img_sid = row[0] if row else None
 
         # 4) update Image row (Status, Text, Type, Extension) if provided
-        fields, params = [], []
+        fields, params = ["ReadyForTraining = 1"], []
         if img_sid is not None:
             fields.append("Status = ?");
             params.append(img_sid)
@@ -198,6 +197,3 @@ def update_data():
     conn.commit()
     conn.close()
     return jsonify({"success": True})
-
-
-
