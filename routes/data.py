@@ -1,5 +1,7 @@
 from flask import Blueprint, request, jsonify, url_for, send_file
 import os
+
+from auth_utils import token_required
 from functions import (
     _get_conn,
     classify_confidence, assign_status_to_detections
@@ -9,6 +11,7 @@ data_bp = Blueprint("data", __name__)
 
 
 @data_bp.route("/data", methods=["GET"])
+# @token_required
 def get_data():
     conn = _get_conn()
     cursor = conn.cursor()
@@ -79,6 +82,7 @@ def get_data():
 
 
 @data_bp.route("/data/image/<int:image_id>", methods=["GET"])
+# @token_required
 def download_image(image_id):
     """
     Lookup the image path by ID and send it back as a file.
@@ -101,6 +105,7 @@ def download_image(image_id):
 
 
 @data_bp.route("/data", methods=["POST"])
+# @token_required
 def update_data():
     updates = request.get_json()
     if not isinstance(updates, list):

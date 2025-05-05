@@ -9,7 +9,9 @@ from flask import Blueprint, jsonify
 from ultralytics import YOLO
 from PIL import Image
 import yaml
+from auth_utils import token_required, admin_required
 
+from auth_utils import token_required
 from config import (
     BACKUP_DIR,
     TRAINING_DATA_DIR,
@@ -297,10 +299,12 @@ def _start_training(kind):
 
 
 @training_bp.route("/train-money", methods=["POST"])
+# @admin_required
 def train_money():
     return _start_training("Money")
 
 
 @training_bp.route("/train-object", methods=["POST"])
+# @admin_required
 def train_object():
     return _start_training("Object")
