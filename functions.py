@@ -205,7 +205,7 @@ def object_detection(request, upload_type, model):
             image_path=filepath,
             type_title=upload_type,
             status_title=image_status,
-            detections=filtered_detections
+            detections=detections
         )
 
         return jsonify({
